@@ -42,6 +42,12 @@ def _config_value(config: Any, attr: str, default: Any = None) -> Any:
 	return default
 
 
+def _get(source: Any, attr: str, default: Any = None) -> Any:
+	if isinstance(source, Mapping):
+		return source.get(attr, default)
+	return getattr(source, attr, default)
+
+
 def results_to_records(results: Sequence[SimulationResult]) -> list[dict[str, Any]]:
 	"""Flatten raw simulation results into plain dictionaries.
 
@@ -55,7 +61,7 @@ def results_to_records(results: Sequence[SimulationResult]) -> list[dict[str, An
 	"""
 	records: list[dict[str, Any]] = []
 	for result in results:
-		config = getattr(result, 'config', None)
+		config = _get(result, 'config')
 		row: dict[str, Any] = {
 			'altruism_prob': _config_value(config, 'altruism_prob'),
 			'tau_margin': _config_value(config, 'tau_margin'),
@@ -71,21 +77,21 @@ def results_to_records(results: Sequence[SimulationResult]) -> list[dict[str, An
 			'coherence_weight': _config_value(config, 'coherence_weight'),
 			'freshness_weight': _config_value(config, 'freshness_weight'),
 			'monotony_weight': _config_value(config, 'monotony_weight'),
-			'total_score': getattr(result, 'total_score', None),
-			'player10_score': getattr(result, 'player10_total_mean', None),
-			'player10_individual': getattr(result, 'player10_individual_mean', None),
-			'player10_rank': getattr(result, 'player10_rank_mean', None),
-			'player10_gap_to_best': getattr(result, 'player10_gap_to_best', None),
-			'player10_instances': getattr(result, 'player10_instances', None),
-			'best_total_score': getattr(result, 'best_total_score', None),
-			'conversation_length': getattr(result, 'conversation_length', None),
-			'early_termination': float(getattr(result, 'early_termination', 0.0)),
-			'pause_count': getattr(result, 'pause_count', None),
-			'unique_items_used': getattr(result, 'unique_items_used', None),
-			'execution_time': getattr(result, 'execution_time', None),
+			'total_score': _get(result, 'total_score'),
+			'player10_score': _get(result, 'player10_total_mean'),
+			'player10_individual': _get(result, 'player10_individual_mean'),
+			'player10_rank': _get(result, 'player10_rank_mean'),
+			'player10_gap_to_best': _get(result, 'player10_gap_to_best'),
+			'player10_instances': _get(result, 'player10_instances'),
+			'best_total_score': _get(result, 'best_total_score'),
+			'conversation_length': _get(result, 'conversation_length'),
+			'early_termination': float(_get(result, 'early_termination', 0.0)),
+			'pause_count': _get(result, 'pause_count'),
+			'unique_items_used': _get(result, 'unique_items_used'),
+			'execution_time': _get(result, 'execution_time'),
 		}
 
-		score_breakdown = getattr(result, 'score_breakdown', None) or {}
+		score_breakdown = _get(result, 'score_breakdown', {}) or {}
 		for component, value in score_breakdown.items():
 			if component == 'total':
 				continue
@@ -115,8 +121,8 @@ def player_metrics_long(results: Sequence[SimulationResult]) -> 'pd.DataFrame':
 	_require_pandas()
 	rows: list[dict[str, Any]] = []
 	for result in results:
-		metrics = getattr(result, 'player_metrics', None) or {}
-		config = getattr(result, 'config', None)
+		metrics = _get(result, 'player_metrics', {}) or {}
+		config = _get(result, 'config')
 		base = {
 			'altruism_prob': _config_value(config, 'altruism_prob'),
 			'tau_margin': _config_value(config, 'tau_margin'),
@@ -424,4 +430,3 @@ __all__ = [
 	'correlation_matrix',
 	'multi_heatmap_pivots',
 ]
-
