@@ -11,7 +11,7 @@ from collections import defaultdict
 from typing import Any
 
 try:
-	from ..sim.test_framework import (
+	from ..experiments.framework import (
 		ParameterRange,
 		TestConfiguration,
 	)

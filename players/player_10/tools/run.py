@@ -10,16 +10,16 @@ import math
 import re
 from pathlib import Path
 
-from ..sim.test_framework import (
-	FlexibleTestRunner,
+from ..experiments.planner import (
+	ExperimentRunner,
 	ParameterRange,
-	TestBuilder,
-	TestConfiguration,
-	create_altruism_comparison_test,
-	create_mixed_opponents_test,
-	create_parameter_sweep_test,
-	create_random_players_test,
-	create_scalability_test,
+	ExperimentPlanBuilder,
+	ExperimentPlan,
+	create_altruism_comparison_experiment,
+	create_mixed_opponents_experiment,
+	create_parameter_sweep_experiment,
+	create_random_players_experiment,
+	create_scalability_experiment,
 )
 from .dashboard import generate_dashboard
 from .reporting import (
@@ -34,7 +34,7 @@ from .statistics import (
 	results_dataframe,
 )
 
-_DEFAULT_CONFIG = TestConfiguration(name='cli_defaults')
+_DEFAULT_PLAN = ExperimentPlan(name='cli_defaults')
 
 
 def _std(values: list[float]) -> float:
@@ -170,10 +170,10 @@ def _parse_player_config_string(config_str: str) -> dict:
 	return out
 
 
-def create_custom_test_from_args(args) -> TestConfiguration:
+def build_experiment_plan_from_args(args) -> ExperimentPlan:
 	"""Create a custom test configuration from command line arguments."""
 	name = (args.name or 'custom').strip() or 'custom'
-	builder = TestBuilder(name, args.description or '')
+	builder = ExperimentPlanBuilder(name, args.description or '')
 
 	# Set parameter ranges
 	if args.altruism:
@@ -275,7 +275,7 @@ Examples:
 	meta_group = parser.add_argument_group('run metadata')
 	meta_group.add_argument('--description', help='|Optional note recorded in the metadata block.')
 
-	range_defaults = _DEFAULT_CONFIG
+	range_defaults = _DEFAULT_PLAN
 	range_group = parser.add_argument_group('parameter ranges')
 	range_group.add_argument(
 		'--altruism',
@@ -344,7 +344,7 @@ Examples:
 		nargs='+',
 		help=(
 			f'|Player configuration overrides as JSON (e.g., \'{{"p10": 8, "pr": 2}}\').\n'
-			f'|Default: {_DEFAULT_CONFIG.player_configs}'
+			f'|Default: {_DEFAULT_PLAN.player_configs}'
 		),
 	)
 	player_group.add_argument(
@@ -381,7 +381,7 @@ Examples:
 	)
 	exec_group.add_argument(
 		'--output-dir',
-		help=f"|Directory for saved results. Default: '{_DEFAULT_CONFIG.output_dir}'.",
+		help=f"|Directory for saved results. Default: '{_DEFAULT_PLAN.output_dir}'.",
 	)
 	exec_group.add_argument(
 		'--no-save',
@@ -455,18 +455,18 @@ Examples:
 	if args.predefined:
 		# Use predefined test
 		predefined_tests = {
-			'altruism': create_altruism_comparison_test(),
-			'random2': create_random_players_test(2),
-			'random5': create_random_players_test(5),
-			'random10': create_random_players_test(10),
-			'scalability': create_scalability_test(),
-			'parameter_sweep': create_parameter_sweep_test(),
-			'mixed': create_mixed_opponents_test(),
+			'altruism': create_altruism_comparison_experiment(),
+			'random2': create_random_players_experiment(2),
+			'random5': create_random_players_experiment(5),
+			'random10': create_random_players_experiment(10),
+			'scalability': create_scalability_experiment(),
+			'parameter_sweep': create_parameter_sweep_experiment(),
+			'mixed': create_mixed_opponents_experiment(),
 		}
 		config = predefined_tests[args.predefined]
 	else:
 		# Create custom test
-		config = create_custom_test_from_args(args)
+		config = build_experiment_plan_from_args(args)
 
 	# Override settings from command line (applies to both predefined and custom)
 	# Parameter ranges
@@ -547,7 +547,7 @@ Examples:
 		config.print_progress = False
 
 	# Create and run test
-	runner = FlexibleTestRunner(config.output_dir)
+	runner = ExperimentRunner(config.output_dir)
 	results = runner.run_test(config)
 
 	# Print summary
