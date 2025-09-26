@@ -9,7 +9,8 @@ identical logic without copy/paste.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
 
 import numpy as np
 
@@ -110,13 +111,13 @@ def results_to_records(results: Sequence[SimulationResult]) -> list[dict[str, An
 	return records
 
 
-def results_dataframe(results: Sequence[SimulationResult]) -> 'pd.DataFrame':
+def results_dataframe(results: Sequence[SimulationResult]) -> pd.DataFrame:
 	"""Return a pandas ``DataFrame`` mirroring the notebook's structure."""
 	_require_pandas()
 	return pd.DataFrame(results_to_records(results))  # type: ignore[return-value]
 
 
-def player_metrics_long(results: Sequence[SimulationResult]) -> 'pd.DataFrame':
+def player_metrics_long(results: Sequence[SimulationResult]) -> pd.DataFrame:
 	"""Explode ``player_metrics`` into a long-form dataframe."""
 	_require_pandas()
 	rows: list[dict[str, Any]] = []
@@ -131,28 +132,30 @@ def player_metrics_long(results: Sequence[SimulationResult]) -> 'pd.DataFrame':
 			'seed': _config_value(config, 'seed'),
 		}
 		for label, data in metrics.items():
-			rows.append({
-				**base,
-				'label': label,
-				'class_name': data.get('class_name'),
-				'alias': data.get('alias'),
-				'total': data.get('total'),
-				'shared': data.get('shared'),
-				'individual': data.get('individual'),
-				'rank': data.get('rank'),
-			})
+			rows.append(
+				{
+					**base,
+					'label': label,
+					'class_name': data.get('class_name'),
+					'alias': data.get('alias'),
+					'total': data.get('total'),
+					'shared': data.get('shared'),
+					'individual': data.get('individual'),
+					'rank': data.get('rank'),
+				}
+			)
 	return pd.DataFrame(rows)  # type: ignore[return-value]
 
 
 def bootstrap_ci(
-	df: 'pd.DataFrame',
+    df: pd.DataFrame,
 	group_cols: Sequence[str],
 	metric: str,
 	*,
 	iterations: int = 1000,
 	confidence: float = 0.95,
 	random_state: int | np.random.Generator | None = None,
-) -> 'pd.DataFrame':
+) -> pd.DataFrame:
 	"""
 	Bootstrapped mean and confidence interval for ``metric`` grouped by ``group_cols``.
 	"""
@@ -187,11 +190,11 @@ def bootstrap_ci(
 
 
 def pairwise_deltas(
-	df: 'pd.DataFrame',
+    df: pd.DataFrame,
 	*,
 	group_col: str = 'altruism_prob',
 	metric: str = 'total_score',
-) -> 'pd.DataFrame':
+) -> pd.DataFrame:
 	"""Return mean deltas and Cohen's d for every pair of levels in ``group_col``."""
 	_require_pandas()
 	levels = sorted(df[group_col].dropna().unique())
@@ -261,7 +264,9 @@ def heatmap_matrix(
 	return row_order, col_order, grid
 
 
-def score_buckets_by_altruism(results: Sequence[SimulationResult]) -> dict[Any, dict[str, list[float]]]:
+def score_buckets_by_altruism(
+	results: Sequence[SimulationResult],
+) -> dict[Any, dict[str, list[float]]]:
 	"""Return total & Player10 score buckets grouped by altruism probability."""
 	buckets: dict[Any, dict[str, list[float]]] = defaultdict(lambda: {'total': [], 'player10': []})
 	for result in results:
@@ -369,7 +374,7 @@ def pareto_points(results: Sequence[SimulationResult]) -> list[dict[str, Any]]:
 
 
 def seed_stability_curves(
-	df: 'pd.DataFrame',
+    df: pd.DataFrame,
 	*,
 	group_col: str = 'altruism_prob',
 	metric: str = 'total_score',
@@ -388,10 +393,10 @@ def seed_stability_curves(
 
 
 def correlation_matrix(
-	df: 'pd.DataFrame',
+    df: pd.DataFrame,
 	*,
 	columns: Sequence[str] | None = None,
-) -> 'pd.DataFrame':
+) -> pd.DataFrame:
 	"""Return a correlation matrix for the requested columns (numeric only)."""
 	_require_pandas()
 	cols = list(columns) if columns is not None else df.columns.tolist()
@@ -400,16 +405,16 @@ def correlation_matrix(
 
 
 def multi_heatmap_pivots(
-	df: 'pd.DataFrame',
+	df: pd.DataFrame,
 	*,
 	fixed: str,
 	row_col: str,
 	col_col: str,
 	metric: str,
-) -> dict[Any, 'pd.DataFrame']:
+) -> dict[Any, pd.DataFrame]:
 	"""Return pivot tables used for faceted heatmaps."""
 	_require_pandas()
-	frames: dict[Any, 'pd.DataFrame'] = {}
+	frames: dict[Any, pd.DataFrame] = {}
 	for level, group in df.groupby(fixed):
 		pivot = group.pivot_table(index=row_col, columns=col_col, values=metric, aggfunc='mean')
 		frames[level] = pivot

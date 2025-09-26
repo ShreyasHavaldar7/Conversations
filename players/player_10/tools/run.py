@@ -59,7 +59,7 @@ def _sanitize_cell(value):
 		return None
 	if isinstance(value, float):
 		return None if math.isnan(value) else float(value)
-	if isinstance(value, (int, bool, str)):
+	if isinstance(value, int | bool | str):
 		return value
 	if hasattr(value, 'item'):
 		return _sanitize_cell(value.item())
@@ -785,9 +785,11 @@ Examples:
 				try:
 					df = results_dataframe(results)
 				except ImportError:
-					print('\n[stats] pandas is required for --stats-* options; install it to enable these reports.')
+					print(
+						'\n[stats] pandas is required for --stats-* options; install it to enable these reports.'
+					)
 				except Exception as exc:  # pragma: no cover - defensive
-					print(f"\n[stats] Failed to build dataframe: {exc}")
+					print(f'\n[stats] Failed to build dataframe: {exc}')
 			if df is not None:
 				if args.stats_ci:
 					group_cols = [col.strip() for col in args.stats_ci_group if col.strip()]
@@ -802,7 +804,7 @@ Examples:
 							random_state=args.stats_seed,
 						)
 					except Exception as exc:  # pragma: no cover - defensive
-						print(f"\n[stats] Failed to compute bootstrap CI: {exc}")
+						print(f'\n[stats] Failed to compute bootstrap CI: {exc}')
 					else:
 						if not ci_df.empty:
 							print('\n=== BOOTSTRAP CONFIDENCE INTERVALS ===')
@@ -828,7 +830,7 @@ Examples:
 							metric=args.stats_pairwise_metric,
 						)
 					except Exception as exc:  # pragma: no cover - defensive
-						print(f"\n[stats] Failed to compute pairwise deltas: {exc}")
+						print(f'\n[stats] Failed to compute pairwise deltas: {exc}')
 					else:
 						if not pairwise_df.empty:
 							print('\n=== PAIRWISE DELTAS ===')

@@ -46,7 +46,7 @@ def _format_table_cell(value) -> str:
 		return 'n/a'
 	if isinstance(value, bool):
 		return 'yes' if value else 'no'
-	if isinstance(value, (int, str)):
+	if isinstance(value, int | str):
 		return str(value)
 	if isinstance(value, float):
 		if math.isnan(value):
@@ -61,9 +61,7 @@ def _table_html(columns: list[str], rows: list[dict[str, object]]) -> str:
 	header = ''.join(f'<th>{col}</th>' for col in columns)
 	body_cells: list[str] = []
 	for record in rows:
-		cells = ''.join(
-			f'<td>{_format_table_cell(record.get(col))}</td>' for col in columns
-		)
+		cells = ''.join(f'<td>{_format_table_cell(record.get(col))}</td>' for col in columns)
 		body_cells.append(f'<tr>{cells}</tr>')
 	body = ''.join(body_cells)
 	return (
@@ -187,7 +185,7 @@ def generate_dashboard(
 		meta = ci_table.get('meta', {}) if isinstance(ci_table.get('meta'), dict) else {}
 		metric = meta.get('metric', 'total_score')
 		groups_meta = meta.get('groups')
-		if isinstance(groups_meta, (list, tuple)):
+		if isinstance(groups_meta, list | tuple):
 			group_label = ', '.join(str(g) for g in groups_meta)
 		else:
 			group_label = str(groups_meta) if groups_meta else 'specified groups'
@@ -195,8 +193,8 @@ def generate_dashboard(
 		iterations = meta.get('iterations')
 		description = (
 			f'Bootstrapped mean ± CI for {metric} grouped by {group_label}.'
-			+ (f' Confidence: {confidence:.2%}.' if isinstance(confidence, (int, float)) else '')
-			+ (f' Iterations: {int(iterations)}.' if isinstance(iterations, (int, float)) else '')
+			+ (f' Confidence: {confidence:.2%}.' if isinstance(confidence, int | float) else '')
+			+ (f' Iterations: {int(iterations)}.' if isinstance(iterations, int | float) else '')
 		)
 		chart_sections.append(
 			{
@@ -208,17 +206,19 @@ def generate_dashboard(
 
 	pairwise_table = analysis.get('pairwise_deltas_table') if isinstance(analysis, dict) else None
 	if isinstance(pairwise_table, dict) and pairwise_table.get('rows'):
-		meta = pairwise_table.get('meta', {}) if isinstance(pairwise_table.get('meta'), dict) else {}
+		meta = (
+			pairwise_table.get('meta', {}) if isinstance(pairwise_table.get('meta'), dict) else {}
+		)
 		metric = meta.get('metric', 'total_score')
 		group_label = meta.get('group', 'altruism_prob')
-		description = (
-			f'Mean deltas and Cohen\'s d for {metric} across {group_label} pairs (a→b).'
-		)
+		description = f"Mean deltas and Cohen's d for {metric} across {group_label} pairs (a→b)."
 		chart_sections.append(
 			{
 				'title': 'Pairwise Deltas',
 				'description': description,
-				'html': _table_html(pairwise_table.get('columns', []), pairwise_table.get('rows', [])),
+				'html': _table_html(
+					pairwise_table.get('columns', []), pairwise_table.get('rows', [])
+				),
 			}
 		)
 
@@ -520,7 +520,9 @@ def generate_dashboard(
 					'showscale': True,
 					'colorbar': {'title': 'Altruism p'},
 				},
-					text=['ET>0.3' if (point['early'] or 0) > 0.3 else '' for point in pareto_points_data],
+				text=[
+					'ET>0.3' if (point['early'] or 0) > 0.3 else '' for point in pareto_points_data
+				],
 				textposition='top center',
 				customdata=customdata,
 				hovertemplate=(
