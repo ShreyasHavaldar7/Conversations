@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
+import math
 import re
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -13,6 +13,12 @@ from ..reporting import (
 	format_players,
 	parameter_label,
 	summarize_parameterizations,
+)
+from ..statistics import (
+	component_means_by_altruism,
+	heatmap_matrix,
+	pareto_points,
+	score_buckets_by_altruism,
 )
 
 
@@ -35,6 +41,39 @@ def _format_number(value: float | None, digits: int = 2) -> str:
 	return f'{value:.{digits}f}'
 
 
+def _format_table_cell(value) -> str:
+	if value is None:
+		return 'n/a'
+	if isinstance(value, bool):
+		return 'yes' if value else 'no'
+	if isinstance(value, (int, str)):
+		return str(value)
+	if isinstance(value, float):
+		if math.isnan(value):
+			return 'n/a'
+		return f'{value:.4f}'.rstrip('0').rstrip('.')
+	return str(value)
+
+
+def _table_html(columns: list[str], rows: list[dict[str, object]]) -> str:
+	if not rows:
+		return '<p class="meta">No data available.</p>'
+	header = ''.join(f'<th>{col}</th>' for col in columns)
+	body_cells: list[str] = []
+	for record in rows:
+		cells = ''.join(
+			f'<td>{_format_table_cell(record.get(col))}</td>' for col in columns
+		)
+		body_cells.append(f'<tr>{cells}</tr>')
+	body = ''.join(body_cells)
+	return (
+		'<table class="summary-table">'
+		f'<thead><tr>{header}</tr></thead>'
+		f'<tbody>{body}</tbody>'
+		'</table>'
+	)
+
+
 COLORWAY = [
 	'#3867d6',
 	'#fa8231',
@@ -51,168 +90,6 @@ COMPONENT_LABELS = {
 	'freshness': 'Freshness',
 	'nonmonotonousness': 'Monotony relief',
 }
-
-
-def _config_value(result, attr: str):
-	config = getattr(result, 'config', None)
-	if config is None:
-		return None
-	if hasattr(config, attr):
-		return getattr(config, attr)
-	if isinstance(config, dict):
-		return config.get(attr)
-	return None
-
-
-def _metric_value(result, metric: str):
-	if metric == 'total_score':
-		return getattr(result, 'total_score', None)
-	if metric == 'player10_score':
-		return getattr(result, 'player10_total_mean', None)
-	if metric == 'player10_individual':
-		return getattr(result, 'player10_individual_mean', None)
-	if metric == 'early_termination':
-		value = getattr(result, 'early_termination', None)
-		if value is None:
-			return None
-		try:
-			return float(value)
-		except (TypeError, ValueError):
-			return None
-	return getattr(result, metric, None)
-
-
-def _compute_heatmap_data(results, row_attr: str, col_attr: str, metric: str):
-	matrix = defaultdict(lambda: defaultdict(list))
-	rows: set = set()
-	cols: set = set()
-	for result in results:
-		row_value = _config_value(result, row_attr)
-		col_value = _config_value(result, col_attr)
-		metric_value = _metric_value(result, metric)
-		if row_value is None or col_value is None or metric_value is None:
-			continue
-		matrix[row_value][col_value].append(float(metric_value))
-		rows.add(row_value)
-		cols.add(col_value)
-	if not rows or not cols:
-		return None
-	row_order = sorted(rows)
-	col_order = sorted(cols)
-	grid: list[list[float | None]] = []
-	for row_value in row_order:
-		row_data: list[float | None] = []
-		for col_value in col_order:
-			bucket = matrix.get(row_value, {}).get(col_value, [])
-			if bucket:
-				row_data.append(sum(bucket) / len(bucket))
-			else:
-				row_data.append(None)
-		grid.append(row_data)
-	return row_order, col_order, grid
-
-
-def _collect_scores_by_altruism(results):
-	buckets = defaultdict(lambda: {'total': [], 'player10': []})
-	for result in results:
-		altruism = _config_value(result, 'altruism_prob')
-		if altruism is None:
-			continue
-		total_value = _metric_value(result, 'total_score')
-		if total_value is not None:
-			buckets[altruism]['total'].append(float(total_value))
-		p10_value = _metric_value(result, 'player10_score')
-		if p10_value is not None:
-			buckets[altruism]['player10'].append(float(p10_value))
-	if not buckets:
-		return None
-	return dict(sorted(buckets.items()))
-
-
-def _component_means_by_altruism(results):
-	sums = defaultdict(lambda: defaultdict(float))
-	counts = defaultdict(lambda: defaultdict(int))
-	for result in results:
-		altruism = _config_value(result, 'altruism_prob')
-		breakdown = getattr(result, 'score_breakdown', None) or {}
-		if altruism is None:
-			continue
-		for key in COMPONENT_LABELS:
-			value = breakdown.get(key)
-			if value is None:
-				continue
-			try:
-				value = float(value)
-			except (TypeError, ValueError):
-				continue
-			sums[altruism][key] += value
-			counts[altruism][key] += 1
-	if not sums:
-		return None
-	altruism_values = sorted(sums.keys())
-	component_series: dict[str, list[float]] = {key: [] for key in COMPONENT_LABELS}
-	for altruism in altruism_values:
-		for key in COMPONENT_LABELS:
-			count = counts[altruism].get(key, 0)
-			if count:
-				component_series[key].append(sums[altruism][key] / count)
-			else:
-				component_series[key].append(0.0)
-	return altruism_values, component_series
-
-
-def _aggregate_pareto_points(results):
-	groups = defaultdict(
-		lambda: {
-			'total_sum': 0.0,
-			'total_count': 0,
-			'p10_sum': 0.0,
-			'p10_count': 0,
-			'early_sum': 0.0,
-			'early_count': 0,
-		}
-	)
-	for result in results:
-		key = (
-			_config_value(result, 'altruism_prob'),
-			_config_value(result, 'tau_margin'),
-			_config_value(result, 'epsilon_fresh'),
-			_config_value(result, 'epsilon_mono'),
-		)
-		if any(value is None for value in key):
-			continue
-		total_value = _metric_value(result, 'total_score')
-		if total_value is not None:
-			groups[key]['total_sum'] += float(total_value)
-			groups[key]['total_count'] += 1
-		p10_value = _metric_value(result, 'player10_individual')
-		if p10_value is not None:
-			groups[key]['p10_sum'] += float(p10_value)
-			groups[key]['p10_count'] += 1
-		early_value = _metric_value(result, 'early_termination')
-		if early_value is not None:
-			groups[key]['early_sum'] += float(early_value)
-			groups[key]['early_count'] += 1
-	points: list[dict[str, float | int | None]] = []
-	for key, data in groups.items():
-		if not data['total_count'] or not data['p10_count']:
-			continue
-		altruism, tau, fresh, mono = key
-		point = {
-			'altruism': altruism,
-			'tau': tau,
-			'fresh': fresh,
-			'mono': mono,
-			'total': data['total_sum'] / data['total_count'],
-			'player10': data['p10_sum'] / data['p10_count'],
-			'early': (data['early_sum'] / data['early_count']) if data['early_count'] else None,
-			'runs': data['total_count'],
-		}
-		points.append(point)
-	if not points:
-		return None
-	points.sort(key=lambda item: (item['altruism'], item['tau'], item['fresh'], item['mono']))
-	return points
 
 
 def _format_axis_value(value):
@@ -304,6 +181,46 @@ def generate_dashboard(
 	output_path = output_dir / f'{timestamp}_{slug}_dashboard.html'
 
 	chart_sections: list[dict[str, str]] = []
+
+	ci_table = analysis.get('bootstrap_ci_table') if isinstance(analysis, dict) else None
+	if isinstance(ci_table, dict) and ci_table.get('rows'):
+		meta = ci_table.get('meta', {}) if isinstance(ci_table.get('meta'), dict) else {}
+		metric = meta.get('metric', 'total_score')
+		groups_meta = meta.get('groups')
+		if isinstance(groups_meta, (list, tuple)):
+			group_label = ', '.join(str(g) for g in groups_meta)
+		else:
+			group_label = str(groups_meta) if groups_meta else 'specified groups'
+		confidence = meta.get('confidence')
+		iterations = meta.get('iterations')
+		description = (
+			f'Bootstrapped mean ± CI for {metric} grouped by {group_label}.'
+			+ (f' Confidence: {confidence:.2%}.' if isinstance(confidence, (int, float)) else '')
+			+ (f' Iterations: {int(iterations)}.' if isinstance(iterations, (int, float)) else '')
+		)
+		chart_sections.append(
+			{
+				'title': 'Bootstrap Confidence Intervals',
+				'description': description,
+				'html': _table_html(ci_table.get('columns', []), ci_table.get('rows', [])),
+			}
+		)
+
+	pairwise_table = analysis.get('pairwise_deltas_table') if isinstance(analysis, dict) else None
+	if isinstance(pairwise_table, dict) and pairwise_table.get('rows'):
+		meta = pairwise_table.get('meta', {}) if isinstance(pairwise_table.get('meta'), dict) else {}
+		metric = meta.get('metric', 'total_score')
+		group_label = meta.get('group', 'altruism_prob')
+		description = (
+			f'Mean deltas and Cohen\'s d for {metric} across {group_label} pairs (a→b).'
+		)
+		chart_sections.append(
+			{
+				'title': 'Pairwise Deltas',
+				'description': description,
+				'html': _table_html(pairwise_table.get('columns', []), pairwise_table.get('rows', [])),
+			}
+		)
 
 	if top_rows:
 		fig_top = go.Figure()
@@ -440,7 +357,12 @@ def generate_dashboard(
 		)
 
 	# Enhanced analysis sections derived from notebook utilities
-	heatmap_data = _compute_heatmap_data(results, 'altruism_prob', 'tau_margin', 'total_score')
+	heatmap_data = heatmap_matrix(
+		results,
+		row_attr='altruism_prob',
+		col_attr='tau_margin',
+		metric='total_score',
+	)
 	if heatmap_data:
 		row_values, col_values, matrix = heatmap_data
 		y_labels = [_format_axis_value(value) for value in row_values]
@@ -475,7 +397,7 @@ def generate_dashboard(
 			},
 		)
 
-	score_buckets = _collect_scores_by_altruism(results)
+	score_buckets = score_buckets_by_altruism(results)
 	if score_buckets:
 		fig_dist = make_subplots(rows=1, cols=2, subplot_titles=('Total score', 'Player10 score'))
 		for idx, (prob, values) in enumerate(score_buckets.items()):
@@ -533,7 +455,7 @@ def generate_dashboard(
 			},
 		)
 
-	component_data = _component_means_by_altruism(results)
+	component_data = component_means_by_altruism(results)
 	if component_data:
 		altruism_values, component_series = component_data
 		labels = [_format_axis_value(value) for value in altruism_values]
@@ -573,8 +495,8 @@ def generate_dashboard(
 			},
 		)
 
-	pareto_points = _aggregate_pareto_points(results)
-	if pareto_points:
+	pareto_points_data = pareto_points(results)
+	if pareto_points_data:
 		customdata = [
 			[
 				_format_axis_value(point['altruism']),
@@ -584,21 +506,21 @@ def generate_dashboard(
 				(f'{point["early"]:.1%}' if point['early'] is not None else 'n/a'),
 				point['runs'],
 			]
-			for point in pareto_points
+			for point in pareto_points_data
 		]
 		fig_pareto = go.Figure(
 			go.Scatter(
-				x=[point['player10'] for point in pareto_points],
-				y=[point['total'] for point in pareto_points],
+				x=[point['player10'] for point in pareto_points_data],
+				y=[point['total'] for point in pareto_points_data],
 				mode='markers',
 				marker={
 					'size': 10,
-					'color': [point['altruism'] for point in pareto_points],
+					'color': [point['altruism'] for point in pareto_points_data],
 					'colorscale': 'Viridis',
 					'showscale': True,
 					'colorbar': {'title': 'Altruism p'},
 				},
-				text=['ET>0.3' if (point['early'] or 0) > 0.3 else '' for point in pareto_points],
+					text=['ET>0.3' if (point['early'] or 0) > 0.3 else '' for point in pareto_points_data],
 				textposition='top center',
 				customdata=customdata,
 				hovertemplate=(
@@ -694,6 +616,10 @@ def generate_dashboard(
 	.detail-section {{ margin-bottom: 16px; }}
 	.detail-section h3 {{ margin: 0 0 8px 0; font-size: 1.05rem; color: #243b53; }}
 	.detail-list {{ margin: 0; padding-left: 18px; color: #334e68; }}
+	.summary-table {{ width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.95rem; }}
+	.summary-table thead th {{ background: #f0f4f8; color: #243b53; padding: 8px 10px; text-align: center; font-weight: 600; }}
+	.summary-table td {{ padding: 8px 10px; text-align: center; border-bottom: 1px solid #e0e6ed; color: #334e68; }}
+	.summary-table tbody tr:nth-child(even) {{ background: #f8fafc; }}
 </style>
 </head>
 <body>

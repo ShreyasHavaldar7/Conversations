@@ -6,6 +6,7 @@ for launching predefined or custom Monte Carlo sweeps from the command line.
 
 import argparse
 import json
+import math
 import re
 from pathlib import Path
 
@@ -27,6 +28,11 @@ from .reporting import (
 	parameter_label,
 	summarize_parameterizations,
 )
+from .statistics import (
+	bootstrap_ci,
+	pairwise_deltas,
+	results_dataframe,
+)
 
 _DEFAULT_CONFIG = TestConfiguration(name='cli_defaults')
 
@@ -45,6 +51,30 @@ def _format_values(value) -> str:
 	if isinstance(value, list | tuple | set):
 		return ', '.join(str(v) for v in value)
 	return str(value)
+
+
+def _sanitize_cell(value):
+	"""Convert pandas/numpy scalars to plain Python values suitable for JSON."""
+	if value is None:
+		return None
+	if isinstance(value, float):
+		return None if math.isnan(value) else float(value)
+	if isinstance(value, (int, bool, str)):
+		return value
+	if hasattr(value, 'item'):
+		return _sanitize_cell(value.item())
+	return value
+
+
+def _serialize_records(records: list[dict[str, object]]) -> list[dict[str, object]]:
+	"""Sanitize list-of-dict records for dashboard consumption."""
+	cleaned: list[dict[str, object]] = []
+	for record in records:
+		row: dict[str, object] = {}
+		for key, value in record.items():
+			row[str(key)] = _sanitize_cell(value)
+		cleaned.append(row)
+	return cleaned
 
 
 class PrettyHelpFormatter(argparse.RawDescriptionHelpFormatter):
@@ -367,6 +397,56 @@ Examples:
 		'--no-dashboard',
 		action='store_true',
 		help='|Skip generating the interactive Plotly dashboard (default: enabled).',
+	)
+
+	stats_group = parser.add_argument_group('advanced analysis outputs')
+	stats_group.add_argument(
+		'--stats-ci',
+		action='store_true',
+		help='|Compute bootstrap confidence intervals for mean scores (default: altruism grouping).',
+	)
+	stats_group.add_argument(
+		'--stats-ci-metric',
+		default='total_score',
+		help='|Metric used for bootstrap CIs (requires --stats-ci). Default: total_score.',
+	)
+	stats_group.add_argument(
+		'--stats-ci-group',
+		nargs='+',
+		default=['altruism_prob'],
+		help='|Column(s) to group by when bootstrapping (requires --stats-ci). Default: altruism_prob.',
+	)
+	stats_group.add_argument(
+		'--stats-ci-iterations',
+		type=int,
+		default=1000,
+		help='|Bootstrap iterations for confidence intervals. Default: 1000.',
+	)
+	stats_group.add_argument(
+		'--stats-ci-confidence',
+		type=float,
+		default=0.95,
+		help='|Confidence level for bootstrap intervals. Default: 0.95.',
+	)
+	stats_group.add_argument(
+		'--stats-pairwise',
+		action='store_true',
+		help='|Compare mean deltas & effect sizes across levels (default: altruism).',
+	)
+	stats_group.add_argument(
+		'--stats-pairwise-metric',
+		default='total_score',
+		help='|Metric analysed for pairwise deltas (requires --stats-pairwise). Default: total_score.',
+	)
+	stats_group.add_argument(
+		'--stats-pairwise-group',
+		default='altruism_prob',
+		help='|Column that defines the cohorts for pairwise deltas. Default: altruism_prob.',
+	)
+	stats_group.add_argument(
+		'--stats-seed',
+		type=int,
+		help='|Optional random seed for bootstrap sampling.',
 	)
 
 	args = parser.parse_args()
@@ -698,6 +778,76 @@ Examples:
 						print(f'    - {line}')
 				else:
 					print('  Differences vs defaults: none')
+
+			stats_tables: dict[str, dict[str, object]] = {}
+			df = None
+			if (args.stats_ci or args.stats_pairwise) and results:
+				try:
+					df = results_dataframe(results)
+				except ImportError:
+					print('\n[stats] pandas is required for --stats-* options; install it to enable these reports.')
+				except Exception as exc:  # pragma: no cover - defensive
+					print(f"\n[stats] Failed to build dataframe: {exc}")
+			if df is not None:
+				if args.stats_ci:
+					group_cols = [col.strip() for col in args.stats_ci_group if col.strip()]
+					group_cols = group_cols or ['altruism_prob']
+					try:
+						ci_df = bootstrap_ci(
+							df,
+							group_cols,
+							args.stats_ci_metric,
+							iterations=args.stats_ci_iterations,
+							confidence=args.stats_ci_confidence,
+							random_state=args.stats_seed,
+						)
+					except Exception as exc:  # pragma: no cover - defensive
+						print(f"\n[stats] Failed to compute bootstrap CI: {exc}")
+					else:
+						if not ci_df.empty:
+							print('\n=== BOOTSTRAP CONFIDENCE INTERVALS ===')
+							print(ci_df.to_string(index=False))
+							table_payload = {
+								'columns': [str(col) for col in ci_df.columns],
+								'rows': _serialize_records(ci_df.to_dict(orient='records')),
+								'meta': {
+									'metric': args.stats_ci_metric,
+									'groups': group_cols,
+									'confidence': args.stats_ci_confidence,
+									'iterations': args.stats_ci_iterations,
+								},
+							}
+							stats_tables['bootstrap_ci_table'] = table_payload
+						else:
+							print('\n[stats] No data available for bootstrap CI computation.')
+				if args.stats_pairwise:
+					try:
+						pairwise_df = pairwise_deltas(
+							df,
+							group_col=args.stats_pairwise_group,
+							metric=args.stats_pairwise_metric,
+						)
+					except Exception as exc:  # pragma: no cover - defensive
+						print(f"\n[stats] Failed to compute pairwise deltas: {exc}")
+					else:
+						if not pairwise_df.empty:
+							print('\n=== PAIRWISE DELTAS ===')
+							print(pairwise_df.to_string(index=False))
+							table_payload = {
+								'columns': [str(col) for col in pairwise_df.columns],
+								'rows': _serialize_records(pairwise_df.to_dict(orient='records')),
+								'meta': {
+									'metric': args.stats_pairwise_metric,
+									'group': args.stats_pairwise_group,
+								},
+							}
+							stats_tables['pairwise_deltas_table'] = table_payload
+						else:
+							print('\n[stats] No data available for pairwise delta computation.')
+			if stats_tables:
+				if not isinstance(analysis, dict):  # defensive
+					analysis = {}
+				analysis.update(stats_tables)
 
 			if not args.no_dashboard:
 				dashboard_root = Path(config.output_dir or '.') / 'dashboards'

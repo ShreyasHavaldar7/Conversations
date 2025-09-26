@@ -27,12 +27,15 @@ This document defines: parameters, CLI usage (run + analyze), and the mechanism.
 ### CLI usage
 - Run: `python -m players.player_10.tools.run [--predefined ... | --name ...] [params]`
 - Analyze: `python -m players.player_10.tools.analyze <results.json> [--analysis] [--plot {altruism,heatmap,distributions}] [--save <png>]`
+- Advanced stats (optional, require pandas):
+  - `--stats-ci [--stats-ci-metric total_score] [--stats-ci-group altruism_prob ...]` to print and embed bootstrap confidence intervals (configurable confidence/iterations via `--stats-ci-confidence`, `--stats-ci-iterations`, `--stats-seed`).
+  - `--stats-pairwise [--stats-pairwise-metric total_score] [--stats-pairwise-group altruism_prob]` to report mean deltas and Cohen's *d* for cohort comparisons.
 
 Notes
 - Parameter defaults mirror the values defined in `players/player_10/agent/config.py` (e.g., `ALTRUISM_USE_PROB`, `TAU_MARGIN`).
 - Results JSON is written to `--output-dir` (default `players/player_10/results`) unless `--no-save` is used.
 - Filenames are prefixed with the run timestamp, and each JSON now contains a top-level `metadata` block summarizing the configuration (ranges, players, seeds, CLI command) followed by the `results` list.
-- Run: `python -m players.player_10.tools.flex [--predefined ... | --name ...] [params]`
+- Run: `python -m players.player_10.tools.run [--predefined ... | --name ...] [params]`
 - Analyze: `python -m players.player_10.tools.analyze <results.json> [--analysis] [--plot {altruism,heatmap,distributions}] [--save <png>]`
 
 Notes
