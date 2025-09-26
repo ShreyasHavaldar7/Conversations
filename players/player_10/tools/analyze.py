@@ -177,6 +177,11 @@ def main() -> None:
     parser.add_argument('results_file', type=Path, help='Path to results JSON file')
     parser.add_argument('--analysis', action='store_true', help='Print text summary tables')
     parser.add_argument(
+        '--analysis-columns',
+        nargs='+',
+        help='Restrict summary tables to these columns (expects exact dataframe column names)',
+    )
+    parser.add_argument(
         '--ci',
         action='store_true',
         help='Compute bootstrap confidence intervals by group (requires pandas).',
@@ -234,13 +239,26 @@ def main() -> None:
     _coerce_numeric(df, numeric_columns)
 
     if args.analysis:
+        analysis_cols: list[str] = []
+        if args.analysis_columns:
+            requested = [col.strip() for col in args.analysis_columns if col.strip()]
+            analysis_cols = [col for col in requested if col in df.columns]
+            missing = sorted(set(requested) - set(analysis_cols))
+            if missing:
+                print(f"Warning: columns not found in dataframe: {', '.join(missing)}")
+
+        dtype_series = df.dtypes.astype(str)
+        if args.dtype_filter:
+            tokens = [token.lower() for token in args.dtype_filter]
+            dtype_series = dtype_series[dtype_series.apply(lambda s: any(token in s.lower() for token in tokens))]
         print('DataFrame dtypes:')
-        print(df.dtypes)
-        overall_cols = [
-            col
-            for col in ['total_score', 'player10_score', 'player10_individual', 'player10_rank']
-            if col in df.columns
-        ]
+        if dtype_series.empty:
+            print('(no columns match dtype filter)' if args.dtype_filter else '(no columns)')
+        else:
+            print(dtype_series.to_string())
+
+        overall_default = ['total_score', 'player10_score', 'player10_individual', 'player10_rank']
+        overall_cols = [col for col in (analysis_cols or overall_default) if col in df.columns]
         print('=== OVERALL ===')
         if overall_cols:
             overall = df[overall_cols].agg(['mean', 'std'])
@@ -249,14 +267,18 @@ def main() -> None:
             print('(no numeric columns available)')
 
         group_cols = [c for c in ['altruism_prob', 'tau_margin', 'epsilon_fresh', 'epsilon_mono'] if c in df.columns]
-        if group_cols and 'total_score' in df.columns:
-            agg = (
-                df.groupby(group_cols)['total_score']
-                .agg(['mean', 'std', 'count'])
-                .reset_index()
-                .sort_values('mean', ascending=False)
-            )
-            _print_table(agg.head(10), 'Top configurations by total_score')
+        metric_candidates = [col for col in (analysis_cols or ['total_score']) if col in df.columns]
+        if group_cols and metric_candidates:
+            agg_dict = {col: ['mean', 'std'] for col in metric_candidates}
+            grouped = df.groupby(group_cols).agg(agg_dict)
+            grouped.columns = [f"{col}_{stat}" for col, stat in grouped.columns.to_flat_index()]
+            grouped = grouped.reset_index()
+            counts = df.groupby(group_cols).size().reset_index(name='count')
+            grouped = grouped.merge(counts, on=group_cols, how='left')
+            sort_col = f"{metric_candidates[0]}_mean"
+            if sort_col in grouped.columns:
+                grouped = grouped.sort_values(sort_col, ascending=False)
+            _print_table(grouped.head(10), 'Top configurations (group means)')
         else:
             print('\n=== Top configurations by total_score ===\n(no data)')
 
